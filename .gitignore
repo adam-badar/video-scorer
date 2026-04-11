@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+dist/
+*.egg-info/
+.env
+.ruff_cache/
+.pytest_cache/
+tests/fixtures/*.mp4
+tests/fixtures/*.wav
+!tests/fixtures/test_silent_3s.mp4
