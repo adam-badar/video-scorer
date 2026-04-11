@@ -78,17 +78,23 @@ def detect_cuts(path: Path) -> dict:
     result = subprocess.run(
         [
             "ffmpeg", "-i", str(path),
-            "-vf", "scdet=threshold=0.3:sc_pass=1",
+            "-vf", "scdet=threshold=0.4:sc_pass=1",
             "-an", "-f", "null", "-",
         ],
         capture_output=True, text=True, timeout=timeout,
     )
 
-    timestamps = []
+    raw_timestamps = []
     for line in result.stderr.splitlines():
         match = re.search(r"lavfi\.scd\.time:\s*([\d.]+)", line)
         if match:
-            timestamps.append(float(match.group(1)))
+            raw_timestamps.append(float(match.group(1)))
+
+    # Filter out cuts too close together (< 0.5s apart = likely transition artifacts)
+    timestamps = []
+    for ts in raw_timestamps:
+        if not timestamps or (ts - timestamps[-1]) >= 0.5:
+            timestamps.append(ts)
 
     total_cuts = len(timestamps)
     cuts_per_minute = (total_cuts / duration) * 60 if duration > 0 else 0.0

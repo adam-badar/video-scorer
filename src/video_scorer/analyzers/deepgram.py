@@ -1,7 +1,8 @@
 """Deepgram Nova-3 transcription analyzer: WPM, fillers, sentiment, topics, language detection."""
 
+import asyncio
 import statistics
-import time
+import sys
 
 import httpx
 
@@ -26,7 +27,7 @@ async def transcribe(wav_path: str) -> dict | None:
         "diarize": "true",
         "utterances": "true",
         "filler_words": "true",
-        "detect_topics": "true",
+        "topics": "true",
         "sentiment": "true",
         "detect_language": "true",
         "mip_opt_out": "true",
@@ -36,13 +37,13 @@ async def transcribe(wav_path: str) -> dict | None:
         audio_bytes = f.read()
 
     headers = {
-        "Authorization": f"Token {settings.deepgram_api_key.get_secret_value()}",
+        "Authorization": f"Token {settings.deepgram_api_key.get_secret_value().strip()}",
         "Content-Type": "audio/wav",
     }
 
     for attempt, delay in enumerate(RETRY_DELAYS):
         if delay > 0:
-            time.sleep(delay)
+            await asyncio.sleep(delay)
         try:
             async with httpx.AsyncClient(timeout=120) as client:
                 resp = await client.post(
@@ -52,10 +53,12 @@ async def transcribe(wav_path: str) -> dict | None:
                     content=audio_bytes,
                 )
             if resp.status_code == 429:
+                print(f"  Deepgram rate limited (attempt {attempt + 1}/{len(RETRY_DELAYS)})", file=sys.stderr)
                 continue
             resp.raise_for_status()
             return resp.json()
-        except (httpx.HTTPStatusError, httpx.TransportError):
+        except (httpx.HTTPStatusError, httpx.TransportError) as e:
+            print(f"  Deepgram error (attempt {attempt + 1}/{len(RETRY_DELAYS)}): {e}", file=sys.stderr)
             if attempt == len(RETRY_DELAYS) - 1:
                 return None
     return None
@@ -77,11 +80,13 @@ def analyze_transcript(deepgram_response: dict) -> dict:
     words = alt.get("words", [])
     transcript = alt.get("transcript", "")
 
-    # Language detection
-    detected_lang = result.get("metadata", {}).get("detected_language")
+    # Language detection — Deepgram puts this on the channel, not metadata
+    detected_lang = channel.get("detected_language")
     if not detected_lang:
-        detected_lang = channel.get("detected_language")
-    lang_confidence = result.get("metadata", {}).get("language_confidence", 0.0)
+        detected_lang = result.get("metadata", {}).get("detected_language")
+    lang_confidence = channel.get("language_confidence", 0.0)
+    if lang_confidence == 0.0:
+        lang_confidence = result.get("metadata", {}).get("language_confidence", 0.0)
 
     is_english = (
         detected_lang is not None
