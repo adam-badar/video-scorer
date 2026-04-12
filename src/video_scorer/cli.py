@@ -12,8 +12,10 @@ import typer
 
 from video_scorer.analyzers import ffmpeg
 from video_scorer.analyzers.deepgram import analyze_transcript, transcribe
+from video_scorer.qualitative.gemini import analyze as gemini_analyze
 from video_scorer.scoring.hooks import check_hooks
 from video_scorer.scoring.scorecard import compute_scorecard
+from video_scorer.storage.supabase import store_scorecard
 
 app = typer.Typer(help="Video content optimization scorer")
 
@@ -179,10 +181,18 @@ async def _run_pipeline(path: Path, platform: str, qualitative: bool, store: boo
     }
 
     if qualitative:
-        typer.echo("  Gemini qualitative analysis not yet implemented (PR2).", err=True)
+        typer.echo("  [+] Running Gemini qualitative analysis...", err=True)
+        transcript_text = transcript_analysis.get("transcript", "") if transcript_analysis else ""
+        qual_result = await gemini_analyze(scorecard, transcript_text)
+        if qual_result:
+            scorecard["qualitative"] = qual_result
+            typer.echo("  Gemini analysis complete.", err=True)
 
     if store:
-        typer.echo("  Supabase storage not yet implemented (PR2).", err=True)
+        typer.echo("  [+] Storing scorecard in Supabase...", err=True)
+        stored = await store_scorecard(scorecard)
+        if stored:
+            typer.echo("  Stored successfully.", err=True)
 
     return scorecard
 
