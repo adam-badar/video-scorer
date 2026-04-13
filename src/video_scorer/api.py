@@ -18,7 +18,7 @@ from video_scorer.storage.supabase import store_scorecard, update_status
 
 app = FastAPI(title="Video Scorer API", version="0.1.0")
 
-VALID_PLATFORMS = {"tiktok", "youtube", "instagram", "linkedin"}
+VALID_PLATFORMS = {"tiktok", "youtube", "instagram", "linkedin", "x"}
 
 
 class AnalyzeRequest(BaseModel):

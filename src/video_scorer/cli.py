@@ -39,8 +39,8 @@ def analyze(
         typer.echo(f"Error: Unsupported file type: {path.suffix}", err=True)
         raise typer.Exit(1)
 
-    if platform not in {"tiktok", "youtube", "instagram", "linkedin"}:
-        typer.echo(f"Error: Unknown platform: {platform}. Use tiktok, youtube, instagram, or linkedin.", err=True)
+    if platform not in {"tiktok", "youtube", "instagram", "linkedin", "x"}:
+        typer.echo(f"Error: Unknown platform: {platform}. Use tiktok, youtube, instagram, linkedin, or x.", err=True)
         raise typer.Exit(1)
 
     # Check FFmpeg
