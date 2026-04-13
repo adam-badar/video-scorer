@@ -5,6 +5,7 @@ PLATFORM_TARGETS = {
     "youtube": {"wpm_range": (160, 200), "cuts_range": (8, 12), "duration_range": (30, 58)},
     "instagram": {"wpm_range": (170, 210), "cuts_range": (8, 12), "duration_range": (15, 30)},
     "linkedin": {"wpm_range": (140, 170), "cuts_range": (4, 6), "duration_range": (30, 90)},
+    "x": {"wpm_range": (170, 210), "cuts_range": (6, 10), "duration_range": (15, 140)},
 }
 
 DEFAULT_TARGETS = {"wpm_range": (160, 200), "cuts_range": (8, 12), "duration_range": (30, 60)}
