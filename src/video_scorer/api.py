@@ -1,5 +1,6 @@
 """FastAPI wrapper for the video-scorer pipeline."""
 
+import asyncio
 import tempfile
 from pathlib import Path
 
@@ -53,21 +54,27 @@ async def analyze(req: AnalyzeRequest):
     await update_status(req.analysis_id, "processing")
 
     try:
-        # Download video to temp file
+        # Download video to temp file using streaming (avoids loading full file into memory)
         with tempfile.TemporaryDirectory() as tmpdir:
             video_path = Path(tmpdir) / _filename_from_url(req.video_url)
 
             async with httpx.AsyncClient(timeout=300, follow_redirects=True) as client:
-                resp = await client.get(req.video_url)
-                resp.raise_for_status()
-                video_path.write_bytes(resp.content)
+                async with client.stream("GET", req.video_url) as resp:
+                    resp.raise_for_status()
+                    with open(video_path, "wb") as f:
+                        async for chunk in resp.aiter_bytes(1024 * 1024):
+                            f.write(chunk)
 
-            # Run the existing pipeline
-            scorecard = await _run_pipeline(
-                path=video_path,
-                platform=req.platform,
-                qualitative=req.qualitative,
-                store=False,  # We handle storage ourselves with analysis_id
+            # Run pipeline in a thread to avoid blocking the async event loop
+            # (_run_pipeline uses subprocess.run internally for FFmpeg calls)
+            scorecard = await asyncio.to_thread(
+                asyncio.run,
+                _run_pipeline(
+                    path=video_path,
+                    platform=req.platform,
+                    qualitative=req.qualitative,
+                    store=False,
+                ),
             )
 
             # Store result by analysis_id
