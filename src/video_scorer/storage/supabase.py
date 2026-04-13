@@ -37,7 +37,7 @@ async def update_status(analysis_id: str, status: str, error_message: str | None
         return False
 
     url = f"{settings.supabase_url.rstrip('/')}/rest/v1/video_scorecards?analysis_id=eq.{analysis_id}"
-    headers["Prefer"] = "return=minimal"
+    headers["Prefer"] = "return=representation"
 
     body: dict = {"status": status}
     if error_message:
@@ -46,7 +46,11 @@ async def update_status(analysis_id: str, status: str, error_message: str | None
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.patch(url, headers=headers, content=json.dumps(body, default=str))
-        if resp.status_code in (200, 204):
+        if resp.status_code == 200:
+            rows = resp.json()
+            if not rows:
+                print(f"  Warning: No row found for analysis_id={analysis_id}", file=sys.stderr)
+                return False
             return True
         print(f"  Warning: Status update failed ({resp.status_code}): {resp.text[:200]}", file=sys.stderr)
         return False
@@ -105,7 +109,7 @@ async def store_scorecard(scorecard: dict, analysis_id: str) -> bool:
     }
 
     url = f"{settings.supabase_url.rstrip('/')}/rest/v1/video_scorecards?analysis_id=eq.{analysis_id}"
-    headers["Prefer"] = "return=minimal"
+    headers["Prefer"] = "return=representation"
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
@@ -115,7 +119,11 @@ async def store_scorecard(scorecard: dict, analysis_id: str) -> bool:
                 content=json.dumps(row, default=str),
             )
 
-        if resp.status_code in (200, 204):
+        if resp.status_code == 200:
+            rows = resp.json()
+            if not rows:
+                print(f"  Warning: No row found for analysis_id={analysis_id}", file=sys.stderr)
+                return False
             return True
 
         print(f"  Warning: Supabase storage failed ({resp.status_code}): {resp.text[:200]}", file=sys.stderr)

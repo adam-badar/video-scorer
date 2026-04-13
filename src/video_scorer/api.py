@@ -1,8 +1,11 @@
 """FastAPI wrapper for the video-scorer pipeline."""
 
 import asyncio
+import hmac
 import tempfile
 from pathlib import Path
+from urllib.parse import urlparse
+from uuid import UUID
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
@@ -18,7 +21,7 @@ VALID_PLATFORMS = {"tiktok", "youtube", "instagram", "linkedin"}
 
 
 class AnalyzeRequest(BaseModel):
-    analysis_id: str
+    analysis_id: UUID
     video_url: str
     platform: str = "tiktok"
     qualitative: bool = False
@@ -28,10 +31,11 @@ class AnalyzeRequest(BaseModel):
 async def check_api_key(request: Request, call_next):
     if request.url.path == "/health":
         return await call_next(request)
-    if settings.api_key:
-        provided = request.headers.get("x-api-key", "")
-        if provided != settings.api_key.get_secret_value():
-            raise HTTPException(status_code=401, detail="Invalid API key")
+    if not settings.api_key:
+        raise HTTPException(status_code=503, detail="API key not configured")
+    provided = request.headers.get("x-api-key", "")
+    if not hmac.compare_digest(provided, settings.api_key.get_secret_value()):
+        raise HTTPException(status_code=401, detail="Invalid API key")
     return await call_next(request)
 
 
@@ -46,12 +50,19 @@ async def analyze(req: AnalyzeRequest):
     if req.platform not in VALID_PLATFORMS:
         raise HTTPException(status_code=400, detail=f"Invalid platform: {req.platform}")
 
-    # SSRF guard — validate URL prefix
-    if not req.video_url.startswith(settings.allowed_url_prefix):
+    # SSRF guard — validate URL host and path prefix
+    parsed = urlparse(req.video_url)
+    expected = urlparse(settings.allowed_url_prefix)
+    if parsed.scheme != "https" or parsed.hostname != expected.hostname or not parsed.path.startswith(expected.path):
         raise HTTPException(status_code=400, detail="Invalid video URL: must be a Supabase Storage URL")
+    # Reject path traversal
+    if ".." in parsed.path:
+        raise HTTPException(status_code=400, detail="Invalid video URL: path traversal not allowed")
+
+    analysis_id = str(req.analysis_id)
 
     # Update status to processing
-    await update_status(req.analysis_id, "processing")
+    await update_status(analysis_id, "processing")
 
     try:
         # Download video to temp file using streaming (avoids loading full file into memory)
@@ -78,18 +89,18 @@ async def analyze(req: AnalyzeRequest):
             )
 
             # Store result by analysis_id
-            stored = await store_scorecard(scorecard, req.analysis_id)
+            stored = await store_scorecard(scorecard, analysis_id)
             if not stored:
-                await update_status(req.analysis_id, "failed", "Failed to store scorecard in database")
+                await update_status(analysis_id, "failed", "Failed to store scorecard in database")
                 return {"status": "failed"}
 
     except httpx.HTTPStatusError as e:
         error_msg = f"Failed to download video: {e.response.status_code}"
-        await update_status(req.analysis_id, "failed", error_msg)
+        await update_status(analysis_id, "failed", error_msg)
         return {"status": "failed"}
     except Exception as e:
         error_msg = f"Pipeline error: {type(e).__name__}: {str(e)[:200]}"
-        await update_status(req.analysis_id, "failed", error_msg)
+        await update_status(analysis_id, "failed", error_msg)
         return {"status": "failed"}
 
     return {"status": "succeeded"}

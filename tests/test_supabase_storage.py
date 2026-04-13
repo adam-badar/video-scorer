@@ -39,7 +39,8 @@ def test_store_success(mock_settings):
     mock_settings.supabase_service_key = type("S", (), {"get_secret_value": lambda self: "test-key"})()
 
     mock_resp = AsyncMock()
-    mock_resp.status_code = 204
+    mock_resp.status_code = 200
+    mock_resp.json = lambda: [{"analysis_id": "test-analysis-id"}]
 
     with patch("video_scorer.storage.supabase.httpx.AsyncClient") as mock_client_cls:
         mock_client = AsyncMock()
