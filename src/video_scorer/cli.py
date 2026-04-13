@@ -189,8 +189,10 @@ async def _run_pipeline(path: Path, platform: str, qualitative: bool, store: boo
             typer.echo("  Gemini analysis complete.", err=True)
 
     if store:
+        import uuid
         typer.echo("  [+] Storing scorecard in Supabase...", err=True)
-        stored = await store_scorecard(scorecard)
+        cli_analysis_id = str(uuid.uuid4())
+        stored = await store_scorecard(scorecard, cli_analysis_id)
         if stored:
             typer.echo("  Stored successfully.", err=True)
 
