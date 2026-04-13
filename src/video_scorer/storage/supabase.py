@@ -30,6 +30,34 @@ def _sanitize_text(text: str | None) -> str | None:
     return re.sub(r'[\u2200-\u22ff\x00-\x08\x0b\x0c\x0e-\x1f]', '', text)
 
 
+async def insert_queued_row(analysis_id: str, platform: str, video_url: str | None = None) -> bool:
+    """Insert a new queued row for an analysis. Used by CLI --store path."""
+    headers = _get_headers()
+    if not headers:
+        return False
+
+    url = f"{settings.supabase_url.rstrip('/')}/rest/v1/video_scorecards"
+    headers["Prefer"] = "return=minimal"
+
+    row = {
+        "analysis_id": analysis_id,
+        "platform": platform,
+        "video_url": video_url,
+        "status": "queued",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(url, headers=headers, content=json.dumps(row, default=str))
+        if resp.status_code in (200, 201):
+            return True
+        print(f"  Warning: Insert queued row failed ({resp.status_code}): {resp.text[:200]}", file=sys.stderr)
+        return False
+    except (httpx.TransportError, httpx.HTTPStatusError) as e:
+        print(f"  Warning: Insert queued row failed: {e}", file=sys.stderr)
+        return False
+
+
 async def update_status(analysis_id: str, status: str, error_message: str | None = None) -> bool:
     """Update the status of an analysis row by analysis_id."""
     headers = _get_headers()
