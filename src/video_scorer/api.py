@@ -65,12 +65,12 @@ async def analyze(req: AnalyzeRequest):
 
     analysis_id = str(req.analysis_id)
 
-    # Update status to processing — abort if row doesn't exist
+    # Update status to processing — abort if row doesn't exist or isn't in a valid state
     status_updated = await update_status(analysis_id, "processing")
     if not status_updated:
         return JSONResponse(
-            status_code=404,
-            content={"detail": f"No queued row found for analysis_id={analysis_id}"},
+            status_code=409,
+            content={"detail": f"Cannot process analysis_id={analysis_id}: row missing or not in queued state"},
         )
 
     try:

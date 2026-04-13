@@ -64,7 +64,9 @@ async def update_status(analysis_id: str, status: str, error_message: str | None
     if not headers:
         return False
 
-    url = f"{settings.supabase_url.rstrip('/')}/rest/v1/video_scorecards?analysis_id=eq.{analysis_id}"
+    # Only transition from non-terminal states to prevent overwriting succeeded/failed
+    allowed_from = "queued,processing" if status == "processing" else "queued,processing"
+    url = f"{settings.supabase_url.rstrip('/')}/rest/v1/video_scorecards?analysis_id=eq.{analysis_id}&status=in.({allowed_from})"
     headers["Prefer"] = "return=representation"
 
     body: dict = {"status": status}
