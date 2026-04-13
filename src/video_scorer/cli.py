@@ -189,10 +189,19 @@ async def _run_pipeline(path: Path, platform: str, qualitative: bool, store: boo
             typer.echo("  Gemini analysis complete.", err=True)
 
     if store:
+        import uuid
+        from video_scorer.storage.supabase import insert_queued_row
         typer.echo("  [+] Storing scorecard in Supabase...", err=True)
-        stored = await store_scorecard(scorecard)
-        if stored:
-            typer.echo("  Stored successfully.", err=True)
+        cli_analysis_id = str(uuid.uuid4())
+        inserted = await insert_queued_row(cli_analysis_id, platform)
+        if inserted:
+            stored = await store_scorecard(scorecard, cli_analysis_id)
+            if stored:
+                typer.echo("  Stored successfully.", err=True)
+            else:
+                typer.echo("  Warning: Failed to store scorecard.", err=True)
+        else:
+            typer.echo("  Warning: Failed to create analysis row.", err=True)
 
     return scorecard
 

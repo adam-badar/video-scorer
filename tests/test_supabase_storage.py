@@ -36,43 +36,47 @@ def _sample_scorecard():
 @patch("video_scorer.storage.supabase.settings")
 def test_store_success(mock_settings):
     mock_settings.supabase_url = "https://test.supabase.co"
-    mock_settings.supabase_anon_key = type("S", (), {"get_secret_value": lambda self: "test-key"})()
+    mock_settings.supabase_service_key = type("S", (), {"get_secret_value": lambda self: "test-key"})()
 
     mock_resp = AsyncMock()
-    mock_resp.status_code = 201
+    mock_resp.status_code = 200
+    mock_resp.json = lambda: [{"analysis_id": "test-analysis-id"}]
 
     with patch("video_scorer.storage.supabase.httpx.AsyncClient") as mock_client_cls:
         mock_client = AsyncMock()
-        mock_client.post = AsyncMock(return_value=mock_resp)
+        mock_client.patch = AsyncMock(return_value=mock_resp)
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client_cls.return_value = mock_client
 
-        result = asyncio.run(store_scorecard(_sample_scorecard()))
+        result = asyncio.run(store_scorecard(_sample_scorecard(), "test-analysis-id"))
         assert result is True
 
-        # Verify the POST was called with the right URL
-        call_args = mock_client.post.call_args
-        assert "video_scorecards" in call_args[1].get("url", call_args[0][0] if call_args[0] else "")
-        # Verify the body contains the file_hash
+        # Verify PATCH was called with analysis_id in URL
+        call_args = mock_client.patch.call_args
+        url = call_args[1].get("url", call_args[0][0] if call_args[0] else "")
+        assert "video_scorecards" in url
+        assert "test-analysis-id" in url
+        # Verify the body contains scorecard data
         body = json.loads(call_args[1].get("content", call_args[0][1] if len(call_args[0]) > 1 else "{}"))
         assert body["file_hash"] == "sha256:abc123"
         assert body["grade"] == "A"
+        assert body["status"] == "succeeded"
 
 
 @patch("video_scorer.storage.supabase.settings")
 def test_store_no_credentials(mock_settings):
     mock_settings.supabase_url = None
-    mock_settings.supabase_anon_key = None
+    mock_settings.supabase_service_key = None
 
-    result = asyncio.run(store_scorecard(_sample_scorecard()))
+    result = asyncio.run(store_scorecard(_sample_scorecard(), "test-analysis-id"))
     assert result is False
 
 
 @patch("video_scorer.storage.supabase.settings")
 def test_store_api_failure(mock_settings):
     mock_settings.supabase_url = "https://test.supabase.co"
-    mock_settings.supabase_anon_key = type("S", (), {"get_secret_value": lambda self: "test-key"})()
+    mock_settings.supabase_service_key = type("S", (), {"get_secret_value": lambda self: "test-key"})()
 
     mock_resp = AsyncMock()
     mock_resp.status_code = 500
@@ -80,26 +84,26 @@ def test_store_api_failure(mock_settings):
 
     with patch("video_scorer.storage.supabase.httpx.AsyncClient") as mock_client_cls:
         mock_client = AsyncMock()
-        mock_client.post = AsyncMock(return_value=mock_resp)
+        mock_client.patch = AsyncMock(return_value=mock_resp)
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client_cls.return_value = mock_client
 
-        result = asyncio.run(store_scorecard(_sample_scorecard()))
+        result = asyncio.run(store_scorecard(_sample_scorecard(), "test-analysis-id"))
         assert result is False
 
 
 @patch("video_scorer.storage.supabase.settings")
 def test_store_network_error(mock_settings):
     mock_settings.supabase_url = "https://test.supabase.co"
-    mock_settings.supabase_anon_key = type("S", (), {"get_secret_value": lambda self: "test-key"})()
+    mock_settings.supabase_service_key = type("S", (), {"get_secret_value": lambda self: "test-key"})()
 
     with patch("video_scorer.storage.supabase.httpx.AsyncClient") as mock_client_cls:
         mock_client = AsyncMock()
-        mock_client.post = AsyncMock(side_effect=httpx.ConnectError("network down"))
+        mock_client.patch = AsyncMock(side_effect=httpx.ConnectError("network down"))
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client_cls.return_value = mock_client
 
-        result = asyncio.run(store_scorecard(_sample_scorecard()))
+        result = asyncio.run(store_scorecard(_sample_scorecard(), "test-analysis-id"))
         assert result is False
