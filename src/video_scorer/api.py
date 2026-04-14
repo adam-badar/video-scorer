@@ -17,7 +17,8 @@ from zoneinfo import ZoneInfo
 
 from video_scorer.cli import _run_pipeline
 from video_scorer.config import settings
-from video_scorer.qualitative.gemini import analyze_script as gemini_analyze_script
+from video_scorer.qualitative.gemini import analyze_script as gemini_analyze_script, analyze_comparison as gemini_compare
+from video_scorer.voice_example import generate_voice_example_markdown
 from video_scorer.scoring.script_scorecard import compute_script_scorecard
 from video_scorer.storage.supabase import store_scorecard, store_script_scorecard, update_status, _sanitize_text
 
@@ -37,6 +38,14 @@ class ScriptAnalyzeRequest(BaseModel):
     script_text: str
     platform: str = "tiktok"
 
+
+class CompareRequest(BaseModel):
+    ai_draft_text: str | None = None
+    final_script_text: str
+    spoken_transcript: str
+    platform: str = "tiktok"
+    topic: str | None = None
+
 MAX_SCRIPT_CHARS = 50_000
 
 
@@ -55,6 +64,53 @@ async def check_api_key(request: Request, call_next):
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.post("/compare-scripts")
+async def compare_scripts(req: CompareRequest):
+    """Synchronous three-way comparison — AI draft vs final script vs spoken transcript."""
+    if req.platform not in VALID_PLATFORMS:
+        return JSONResponse(status_code=400, content={"detail": f"Invalid platform: {req.platform}"})
+
+    if not req.final_script_text or not req.final_script_text.strip():
+        return JSONResponse(status_code=400, content={"detail": "Final script text is required"})
+
+    if not req.spoken_transcript or not req.spoken_transcript.strip():
+        return JSONResponse(status_code=400, content={"detail": "Spoken transcript is required"})
+
+    if len(req.final_script_text) > MAX_SCRIPT_CHARS or len(req.spoken_transcript) > MAX_SCRIPT_CHARS:
+        return JSONResponse(status_code=400, content={"detail": f"Text too long. Maximum {MAX_SCRIPT_CHARS} characters per field."})
+
+    if req.ai_draft_text and len(req.ai_draft_text) > MAX_SCRIPT_CHARS:
+        return JSONResponse(status_code=400, content={"detail": f"AI draft too long. Maximum {MAX_SCRIPT_CHARS} characters."})
+
+    # Run Gemini comparison analysis
+    delta_analysis = await gemini_compare(
+        ai_draft_text=req.ai_draft_text,
+        final_script_text=req.final_script_text,
+        spoken_transcript=req.spoken_transcript,
+        platform=req.platform,
+    )
+
+    if not delta_analysis:
+        return JSONResponse(status_code=502, content={"detail": "Comparison analysis failed. Gemini may be unavailable."})
+
+    # Generate voice example markdown
+    voice_md, voice_filename = generate_voice_example_markdown(
+        platform=req.platform,
+        ai_draft_text=req.ai_draft_text,
+        final_script_text=req.final_script_text,
+        spoken_transcript=req.spoken_transcript,
+        delta_analysis=delta_analysis,
+        topic=req.topic,
+    )
+
+    return {
+        "delta_analysis": delta_analysis,
+        "voice_example_content": voice_md,
+        "voice_example_filename": voice_filename,
+        "platform": req.platform,
+    }
 
 
 @app.post("/analyze-script")

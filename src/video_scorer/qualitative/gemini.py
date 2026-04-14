@@ -194,6 +194,127 @@ async def analyze_script(script_text: str, platform: str, word_count: int, estim
         return None
 
 
+COMPARE_SYSTEM_PROMPT = """You are a content voice analyst. You compare three versions of the same content: the AI-generated draft, the human-edited final script, and what was actually spoken on camera. Your job is to extract patterns that will make future AI drafts sound more like how the creator actually speaks."""
+
+COMPARE_PROMPT_TEMPLATE = """Compare these three versions of the same video content.
+
+<ai_draft>
+{ai_draft_text}
+</ai_draft>
+
+<final_script>
+{final_script_text}
+</final_script>
+
+<spoken_transcript>
+{spoken_transcript}
+</spoken_transcript>
+
+<context>
+Platform: {platform}
+</context>
+
+Analyze the differences between all three versions. Return JSON:
+{{
+  "deltas": [
+    {{
+      "what_changed": "Specific text that was different between versions",
+      "from_version": "ai_draft | final_script",
+      "to_version": "final_script | spoken_transcript",
+      "why": "Why this change was made (inferred from context)",
+      "pattern_to_carry_forward": "A reusable rule for future AI drafts"
+    }}
+  ],
+  "voice_patterns": [
+    "Concise patterns about how the creator speaks vs writes — e.g., 'Uses shorter sentences on camera than in script', 'Drops technical jargon when speaking'"
+  ],
+  "overall_assessment": "2-3 sentences summarizing the key differences and what the AI draft should do differently next time"
+}}
+
+Focus on patterns that are reusable — not one-off edits. Include at least 3 deltas and 2 voice patterns.
+
+Respond with ONLY the JSON object, no markdown formatting."""
+
+COMPARE_BOUNDARY_TAGS = ["<ai_draft>", "</ai_draft>", "<final_script>", "</final_script>", "<spoken_transcript>", "</spoken_transcript>", "<context>", "</context>"]
+
+
+async def analyze_comparison(
+    ai_draft_text: str | None,
+    final_script_text: str,
+    spoken_transcript: str,
+    platform: str,
+) -> dict | None:
+    """Generate three-way delta analysis via Gemini.
+
+    Returns structured delta dict, or None on failure.
+    """
+    if not settings.gemini_api_key:
+        print("  Warning: Set VIDEO_SCORER_GEMINI_API_KEY for comparison analysis.", file=sys.stderr)
+        return None
+
+    if not final_script_text.strip() or not spoken_transcript.strip():
+        print("  Skipped: Need both final script and spoken transcript.", file=sys.stderr)
+        return None
+
+    # Sanitize all text fields
+    safe_draft = _sanitize_for_prompt(ai_draft_text or "", COMPARE_BOUNDARY_TAGS + SCRIPT_BOUNDARY_TAGS)
+    safe_final = _sanitize_for_prompt(final_script_text, COMPARE_BOUNDARY_TAGS + SCRIPT_BOUNDARY_TAGS)
+    safe_spoken = _sanitize_for_prompt(spoken_transcript, COMPARE_BOUNDARY_TAGS + VIDEO_BOUNDARY_TAGS)
+
+    # Handle two-way comparison when AI draft is empty
+    draft_text = safe_draft if safe_draft.strip() else "(No AI draft provided — compare final script to spoken transcript only)"
+
+    prompt = COMPARE_PROMPT_TEMPLATE.format(
+        ai_draft_text=draft_text,
+        final_script_text=safe_final,
+        spoken_transcript=safe_spoken,
+        platform=platform,
+    )
+
+    payload = {
+        "system_instruction": {"parts": [{"text": COMPARE_SYSTEM_PROMPT}]},
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0.3,
+            "maxOutputTokens": 2048,
+            "responseMimeType": "application/json",
+        },
+    }
+
+    url = f"{GEMINI_URL}?key={settings.gemini_api_key.get_secret_value().strip()}"
+
+    try:
+        async with httpx.AsyncClient(timeout=90) as client:
+            resp = await client.post(url, json=payload)
+
+        if resp.status_code != 200:
+            print(f"  Warning: Gemini comparison analysis failed ({resp.status_code}): {resp.text[:200]}", file=sys.stderr)
+            return None
+
+        data = resp.json()
+        candidates = data.get("candidates", [])
+        if not candidates:
+            print("  Warning: Gemini returned no candidates for comparison.", file=sys.stderr)
+            return None
+
+        text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+        parsed = json.loads(text)
+
+        # Validate structure
+        if "deltas" not in parsed or not isinstance(parsed["deltas"], list):
+            print("  Warning: Gemini comparison missing 'deltas' array.", file=sys.stderr)
+            return None
+
+        return parsed
+
+    except json.JSONDecodeError:
+        print(f"  Warning: Gemini returned non-JSON for comparison: {text[:200]}", file=sys.stderr)
+        return None
+    except (httpx.TransportError, httpx.HTTPStatusError) as e:
+        print(f"  Warning: Gemini comparison analysis failed: {e}", file=sys.stderr)
+        return None
+
+
 async def analyze(scorecard: dict, transcript: str) -> dict | None:
     """Send transcript + metrics to Gemini for qualitative assessment.
 
