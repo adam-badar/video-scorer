@@ -102,10 +102,10 @@ def _validate_script_gemini_output(result: dict) -> dict:
     Untrusted Gemini output could inflate scores via prompt injection.
     Only allow known values for scoring-critical fields.
     """
-    # Validate sections_detected — only allow known section names
+    # Validate sections_detected — only allow known section names, normalize to lowercase
     sections = result.get("sections_detected", [])
     if isinstance(sections, list):
-        result["sections_detected"] = [s for s in sections if isinstance(s, str) and s.lower() in VALID_SECTIONS]
+        result["sections_detected"] = [s.lower() for s in sections if isinstance(s, str) and s.lower() in VALID_SECTIONS]
     else:
         result["sections_detected"] = []
 

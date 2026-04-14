@@ -95,3 +95,12 @@ def test_validate_handles_missing_fields():
     result = _validate_script_gemini_output({})
     assert result["sections_detected"] == []
     assert result["focus_score"] == "unfocused"
+
+
+def test_validate_normalizes_section_case():
+    """Mixed-case section names are normalized to lowercase."""
+    result = _validate_script_gemini_output({
+        "sections_detected": ["PROBLEM", "Solution", "CTA"],
+        "focus_score": "single_thread",
+    })
+    assert result["sections_detected"] == ["problem", "solution", "cta"]

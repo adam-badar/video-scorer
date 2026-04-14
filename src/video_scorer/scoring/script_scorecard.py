@@ -7,7 +7,8 @@ from video_scorer.scoring.scorecard import PLATFORM_TARGETS, DEFAULT_TARGETS, _g
 
 # CTA keywords — detected via word-boundary regex to avoid false positives
 # (e.g., "country" should not match "try", "LinkedIn" should not match "link")
-CTA_KEYWORDS = ["check it out", "check out", "sign up", "subscribe", "follow", "comment", "download", "link in bio"]
+# Multi-word phrases listed first for priority matching
+CTA_KEYWORDS = ["check it out", "check out", "sign up", "link in bio", "subscribe", "follow", "comment", "download", "try it", "link below"]
 
 
 def _split_sentences(text: str) -> list[str]:

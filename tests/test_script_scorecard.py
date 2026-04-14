@@ -152,6 +152,15 @@ def test_cta_false_positive_linkedin():
     assert no_early["passed"] is True  # "LinkedIn" is not a CTA
 
 
+def test_cta_try_it_detected():
+    """'Try it free today' at the end should match CTA keyword 'try it'."""
+    script = "I built seven products this year. Without a team. Try it free today."
+    result = compute_script_scorecard(script, "tiktok")
+    structure_checks = result["categories"]["structure"]["checks"]
+    cta_check = next(c for c in structure_checks if c["name"] == "cta_positioned")
+    assert cta_check["passed"] is True
+
+
 def test_empty_sections_detected_scores_zero():
     """When Gemini returns empty sections_detected, score 0/15 (not null)."""
     gemini_result = {"sections_detected": [], "focus_score": "single_thread"}
