@@ -5,8 +5,9 @@ import re
 from video_scorer.scoring.hooks import GREETING_WORDS, CONTRAST_MARKERS
 from video_scorer.scoring.scorecard import PLATFORM_TARGETS, DEFAULT_TARGETS, _grade_from_pct
 
-# CTA keywords — detected in last 20% of script
-CTA_KEYWORDS = {"follow", "subscribe", "comment", "check out", "check it out", "link", "sign up", "download", "try"}
+# CTA keywords — detected via word-boundary regex to avoid false positives
+# (e.g., "country" should not match "try", "LinkedIn" should not match "link")
+CTA_KEYWORDS = ["check it out", "check out", "sign up", "subscribe", "follow", "comment", "download", "link in bio"]
 
 
 def _split_sentences(text: str) -> list[str]:
@@ -80,23 +81,31 @@ def compute_script_scorecard(script_text: str, platform: str, gemini_result: dic
     # --- Structure (30 pts) ---
     # Sections detected via Gemini (15 pts) — null if Gemini unavailable
     sections_detected = None
-    if gemini_result and gemini_result.get("sections_detected"):
+    if gemini_result is not None and "sections_detected" in gemini_result:
         detected = gemini_result["sections_detected"]
         # Full credit if 3+ of [problem, solution, proof, cta] detected
+        # Empty list from Gemini means no sections found — score 0, not null
         expected = {"problem", "solution", "proof", "cta"}
-        match_count = len(set(detected) & expected)
+        match_count = len(set(detected) & expected) if isinstance(detected, list) else 0
         sections_detected = match_count >= 3
     metrics.append(("structure", "sections_detected", sections_detected, 15))
 
     # CTA in last 1-2 sentences, not in first 1-2 sentences
+    # Use word-boundary regex to avoid false positives (e.g., "country" matching "try")
     sentences_lower = [s.lower() for s in sentences]
 
+    def _has_cta(text: str) -> bool:
+        for kw in CTA_KEYWORDS:
+            if re.search(r'\b' + re.escape(kw) + r'\b', text):
+                return True
+        return False
+
     last_sentences = " ".join(sentences_lower[-2:]) if len(sentences_lower) >= 2 else " ".join(sentences_lower)
-    has_cta_end = any(kw in last_sentences for kw in CTA_KEYWORDS)
+    has_cta_end = _has_cta(last_sentences)
     metrics.append(("structure", "cta_positioned", has_cta_end, 10))
 
     first_sentences = " ".join(sentences_lower[:2]) if len(sentences_lower) >= 2 else " ".join(sentences_lower)
-    no_cta_start = not any(kw in first_sentences for kw in CTA_KEYWORDS)
+    no_cta_start = not _has_cta(first_sentences)
     metrics.append(("structure", "no_early_cta", no_cta_start, 5))
 
     # --- Pacing (20 pts) ---

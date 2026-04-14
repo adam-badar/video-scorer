@@ -132,6 +132,38 @@ def test_cta_at_start_penalized():
     assert no_early_check["passed"] is False
 
 
+def test_cta_false_positive_country():
+    """'country' should not match CTA keyword 'try'."""
+    script = "I moved to another country. The weather is great here."
+    result = compute_script_scorecard(script, "tiktok")
+    structure_checks = result["categories"]["structure"]["checks"]
+    cta_end = next(c for c in structure_checks if c["name"] == "cta_positioned")
+    no_early = next(c for c in structure_checks if c["name"] == "no_early_cta")
+    assert cta_end["passed"] is False  # No real CTA
+    assert no_early["passed"] is True   # No false-positive CTA in first sentences
+
+
+def test_cta_false_positive_linkedin():
+    """'LinkedIn' should not match CTA keyword 'link'."""
+    script = "I post on LinkedIn every day. Here's what I learned about growth."
+    result = compute_script_scorecard(script, "tiktok")
+    structure_checks = result["categories"]["structure"]["checks"]
+    no_early = next(c for c in structure_checks if c["name"] == "no_early_cta")
+    assert no_early["passed"] is True  # "LinkedIn" is not a CTA
+
+
+def test_empty_sections_detected_scores_zero():
+    """When Gemini returns empty sections_detected, score 0/15 (not null)."""
+    gemini_result = {"sections_detected": [], "focus_score": "single_thread"}
+    result = compute_script_scorecard(SAMPLE_SCRIPT, "tiktok", gemini_result)
+    structure_checks = result["categories"]["structure"]["checks"]
+    sections_check = next(c for c in structure_checks if c["name"] == "sections_detected")
+    assert sections_check["passed"] is False
+    assert sections_check["scored"] == 0
+    # Should be scored (not null) — counted in max_possible
+    assert result["max_possible"] == 100
+
+
 def test_grade_renormalization():
     """Grade should be based on percentage of available points, not total 100."""
     # Without Gemini, max is 65. If we get 55/65, that's 84.6% = A
