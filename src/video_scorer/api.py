@@ -14,7 +14,9 @@ from pydantic import BaseModel
 
 from video_scorer.cli import _run_pipeline
 from video_scorer.config import settings
-from video_scorer.storage.supabase import store_scorecard, update_status
+from video_scorer.qualitative.gemini import analyze_script as gemini_analyze_script
+from video_scorer.scoring.script_scorecard import compute_script_scorecard
+from video_scorer.storage.supabase import store_scorecard, store_script_scorecard, update_status, _sanitize_text
 
 app = FastAPI(title="Video Scorer API", version="0.1.0")
 
@@ -26,6 +28,13 @@ class AnalyzeRequest(BaseModel):
     video_url: str
     platform: str = "tiktok"
     qualitative: bool = False
+
+
+class ScriptAnalyzeRequest(BaseModel):
+    script_text: str
+    platform: str = "tiktok"
+
+MAX_SCRIPT_CHARS = 50_000
 
 
 @app.middleware("http")
@@ -43,6 +52,73 @@ async def check_api_key(request: Request, call_next):
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.post("/analyze-script")
+async def analyze_script(req: ScriptAnalyzeRequest):
+    """Synchronous script analysis — rule-based checks + Gemini qualitative."""
+    # Validate platform
+    if req.platform not in VALID_PLATFORMS:
+        return JSONResponse(status_code=400, content={"detail": f"Invalid platform: {req.platform}"})
+
+    # Validate script text
+    if not req.script_text or not req.script_text.strip():
+        return JSONResponse(status_code=400, content={"detail": "Script text is required"})
+
+    if len(req.script_text) > MAX_SCRIPT_CHARS:
+        return JSONResponse(status_code=400, content={"detail": f"Script too long. Maximum {MAX_SCRIPT_CHARS} characters."})
+
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+
+    warnings = []
+
+    # Step 1: Compute rule-based scorecard (without Gemini)
+    scorecard = compute_script_scorecard(req.script_text, req.platform)
+
+    # Step 2: Run Gemini qualitative analysis (always attempted)
+    gemini_result = await gemini_analyze_script(
+        script_text=req.script_text,
+        platform=req.platform,
+        word_count=scorecard["word_count"],
+        estimated_duration=scorecard["estimated_duration_seconds"],
+        target_wpm=scorecard["target_wpm"],
+    )
+
+    if gemini_result:
+        # Recompute scorecard with Gemini results (for focus + structure.sections)
+        scorecard = compute_script_scorecard(req.script_text, req.platform, gemini_result)
+    else:
+        warnings.append("Gemini qualitative analysis unavailable. Scoring based on rule-based checks only (max 65 points).")
+
+    # Step 3: Build response
+    now_et = datetime.now(timezone.utc).astimezone(ZoneInfo("America/New_York"))
+
+    result = {
+        "script_text": req.script_text,
+        "platform": req.platform,
+        "grade": scorecard["grade"],
+        "total_score": scorecard["total"],
+        "max_possible": scorecard["max_possible"],
+        "percentage": scorecard["percentage"],
+        "word_count": scorecard["word_count"],
+        "estimated_duration_seconds": scorecard["estimated_duration_seconds"],
+        "target_wpm": scorecard["target_wpm"],
+        "breakdown": scorecard["breakdown"],
+        "categories": scorecard["categories"],
+        "platform_targets": scorecard["platform_targets"],
+        "qualitative": gemini_result,
+        "raw_scorecard": scorecard,
+        "warnings": warnings,
+        "scored_at": now_et.isoformat(),
+    }
+
+    # Step 4: Store in Supabase
+    stored = await store_script_scorecard(result)
+    if not stored:
+        warnings.append("Failed to store scorecard in database.")
+
+    return result
 
 
 @app.post("/analyze", status_code=202)

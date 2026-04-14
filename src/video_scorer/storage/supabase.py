@@ -30,6 +30,42 @@ def _sanitize_text(text: str | None) -> str | None:
     return re.sub(r'[\u2200-\u22ff\x00-\x08\x0b\x0c\x0e-\x1f]', '', text)
 
 
+async def store_script_scorecard(result: dict) -> bool:
+    """Store a script scorecard result (synchronous — no queued/processing state)."""
+    headers = _get_headers()
+    if not headers:
+        return False
+
+    qualitative = result.get("qualitative")
+    if qualitative and isinstance(qualitative, dict):
+        qualitative = {k: _sanitize_text(v) if isinstance(v, str) else v for k, v in qualitative.items()}
+
+    row = {
+        "platform": result.get("platform", "tiktok"),
+        "script_text": _sanitize_text(result.get("script_text", "")),
+        "grade": result.get("grade"),
+        "total_score": result.get("total_score"),
+        "max_possible": result.get("max_possible"),
+        "qualitative": qualitative,
+        "raw_scorecard": result.get("raw_scorecard"),
+        "scored_at": result.get("scored_at"),
+    }
+
+    url = f"{settings.supabase_url.rstrip('/')}/rest/v1/script_scorecards"
+    headers["Prefer"] = "return=minimal"
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(url, headers=headers, content=json.dumps(row, default=str))
+        if resp.status_code in (200, 201):
+            return True
+        print(f"  Warning: Script scorecard storage failed ({resp.status_code}): {resp.text[:200]}", file=sys.stderr)
+        return False
+    except (httpx.TransportError, httpx.HTTPStatusError) as e:
+        print(f"  Warning: Script scorecard storage failed: {e}", file=sys.stderr)
+        return False
+
+
 async def insert_queued_row(analysis_id: str, platform: str, video_url: str | None = None) -> bool:
     """Insert a new queued row for an analysis. Used by CLI --store path."""
     headers = _get_headers()
