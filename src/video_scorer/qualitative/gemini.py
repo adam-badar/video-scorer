@@ -7,7 +7,7 @@ import httpx
 
 from video_scorer.config import settings
 
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent"
 
 SYSTEM_PROMPT = """You are a short-form video content analyst specializing in TikTok, YouTube Shorts, Instagram Reels, and LinkedIn video. You analyze video transcripts and metrics to provide actionable feedback.
 
@@ -300,10 +300,26 @@ async def analyze_comparison(
         text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
         parsed = json.loads(text)
 
-        # Validate structure
+        # Validate structure — each delta must be a dict
         if "deltas" not in parsed or not isinstance(parsed["deltas"], list):
             print("  Warning: Gemini comparison missing 'deltas' array.", file=sys.stderr)
             return None
+
+        validated_deltas = []
+        for d in parsed["deltas"]:
+            if not isinstance(d, dict):
+                continue
+            validated_deltas.append({
+                "what_changed": str(d.get("what_changed", "")),
+                "from_version": str(d.get("from_version", "")),
+                "to_version": str(d.get("to_version", "")),
+                "why": str(d.get("why", "")),
+                "pattern_to_carry_forward": str(d.get("pattern_to_carry_forward", "")),
+            })
+        parsed["deltas"] = validated_deltas
+
+        patterns = parsed.get("voice_patterns", [])
+        parsed["voice_patterns"] = [str(p) for p in patterns if isinstance(p, (str, int, float))] if isinstance(patterns, list) else []
 
         return parsed
 
