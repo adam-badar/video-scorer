@@ -9,3 +9,4 @@ dist/
 tests/fixtures/*.mp4
 tests/fixtures/*.wav
 !tests/fixtures/test_silent_3s.mp4
+supabase/.temp/
