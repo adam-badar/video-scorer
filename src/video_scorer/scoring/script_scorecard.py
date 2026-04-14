@@ -88,15 +88,15 @@ def compute_script_scorecard(script_text: str, platform: str, gemini_result: dic
         sections_detected = match_count >= 3
     metrics.append(("structure", "sections_detected", sections_detected, 15))
 
-    # CTA in last 20% of script, not in first 20%
-    total_chars = len(script_lower)
-    last_20_start = int(total_chars * 0.8)
-    first_20_end = int(total_chars * 0.2)
+    # CTA in last 1-2 sentences, not in first 1-2 sentences
+    sentences_lower = [s.lower() for s in sentences]
 
-    has_cta_end = any(kw in script_lower[last_20_start:] for kw in CTA_KEYWORDS)
+    last_sentences = " ".join(sentences_lower[-2:]) if len(sentences_lower) >= 2 else " ".join(sentences_lower)
+    has_cta_end = any(kw in last_sentences for kw in CTA_KEYWORDS)
     metrics.append(("structure", "cta_positioned", has_cta_end, 10))
 
-    no_cta_start = not any(kw in script_lower[:first_20_end] for kw in CTA_KEYWORDS)
+    first_sentences = " ".join(sentences_lower[:2]) if len(sentences_lower) >= 2 else " ".join(sentences_lower)
+    no_cta_start = not any(kw in first_sentences for kw in CTA_KEYWORDS)
     metrics.append(("structure", "no_early_cta", no_cta_start, 5))
 
     # --- Pacing (20 pts) ---

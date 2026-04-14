@@ -23,6 +23,10 @@ Follow for more."""
 
 SHORT_SCRIPT = "Check this out. Subscribe now."
 
+CTA_SHORT_SCRIPT = """This is the main content of my video about building products.
+
+Subscribe now."""
+
 
 def test_script_scorecard_max_possible_is_100_with_gemini():
     """Script scoring has max 100 points, not 130 (no video-only metrics)."""
@@ -108,6 +112,24 @@ def test_gemini_focus_scoring():
 
     assert focus_cats_focused["scored"] == 20  # 15 + 5
     assert focus_cats_unfocused["scored"] == 0
+
+
+def test_cta_short_script_detected():
+    """CTA in last sentence of a short script should be detected (sentence-based, not char-slice)."""
+    result = compute_script_scorecard(SHORT_SCRIPT, "tiktok")
+    structure_checks = result["categories"]["structure"]["checks"]
+    cta_check = next(c for c in structure_checks if c["name"] == "cta_positioned")
+    # "Subscribe now" is the last sentence — should pass
+    assert cta_check["passed"] is True
+
+
+def test_cta_at_start_penalized():
+    """CTA in first sentence should be penalized."""
+    script = "Subscribe now. Then I'll tell you about building products."
+    result = compute_script_scorecard(script, "tiktok")
+    structure_checks = result["categories"]["structure"]["checks"]
+    no_early_check = next(c for c in structure_checks if c["name"] == "no_early_cta")
+    assert no_early_check["passed"] is False
 
 
 def test_grade_renormalization():

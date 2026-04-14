@@ -81,10 +81,41 @@ Respond with ONLY the JSON object, no markdown formatting."""
 
 
 def _sanitize_for_prompt(text: str, boundary_tags: list[str]) -> str:
-    """Strip prompt boundary markers from text before interpolation into a prompt template."""
+    """Strip prompt boundary markers from text before interpolation into a prompt template.
+
+    Case-insensitive to prevent bypass via &lt;/SCRIPT&gt;, &lt;Script&gt;, etc.
+    """
+    import re
     result = text
     for tag in boundary_tags:
-        result = result.replace(tag, "")
+        result = re.sub(re.escape(tag), "", result, flags=re.IGNORECASE)
+    return result
+
+
+VALID_SECTIONS = {"problem", "solution", "proof", "cta"}
+VALID_FOCUS_SCORES = {"single_thread", "branches", "unfocused"}
+
+
+def _validate_script_gemini_output(result: dict) -> dict:
+    """Validate and clamp Gemini script analysis output to prevent score manipulation.
+
+    Untrusted Gemini output could inflate scores via prompt injection.
+    Only allow known values for scoring-critical fields.
+    """
+    # Validate sections_detected — only allow known section names
+    sections = result.get("sections_detected", [])
+    if isinstance(sections, list):
+        result["sections_detected"] = [s for s in sections if isinstance(s, str) and s.lower() in VALID_SECTIONS]
+    else:
+        result["sections_detected"] = []
+
+    # Validate focus_score — only allow known values
+    focus = result.get("focus_score", "")
+    if not isinstance(focus, str) or focus.lower() not in VALID_FOCUS_SCORES:
+        result["focus_score"] = "unfocused"  # Conservative default
+    else:
+        result["focus_score"] = focus.lower()
+
     return result
 
 
@@ -152,7 +183,8 @@ async def analyze_script(script_text: str, platform: str, word_count: int, estim
             return None
 
         text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-        return json.loads(text)
+        parsed = json.loads(text)
+        return _validate_script_gemini_output(parsed)
 
     except json.JSONDecodeError:
         print(f"  Warning: Gemini returned non-JSON for script analysis: {text[:200]}", file=sys.stderr)

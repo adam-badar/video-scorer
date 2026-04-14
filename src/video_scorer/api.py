@@ -12,6 +12,9 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
 from video_scorer.cli import _run_pipeline
 from video_scorer.config import settings
 from video_scorer.qualitative.gemini import analyze_script as gemini_analyze_script
@@ -67,9 +70,6 @@ async def analyze_script(req: ScriptAnalyzeRequest):
 
     if len(req.script_text) > MAX_SCRIPT_CHARS:
         return JSONResponse(status_code=400, content={"detail": f"Script too long. Maximum {MAX_SCRIPT_CHARS} characters."})
-
-    from datetime import datetime, timezone
-    from zoneinfo import ZoneInfo
 
     warnings = []
 
