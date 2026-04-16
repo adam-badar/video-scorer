@@ -7,7 +7,7 @@ import httpx
 
 from video_scorer.config import settings
 
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent"
 
 SYSTEM_PROMPT = """You are a short-form video content analyst specializing in TikTok, YouTube Shorts, Instagram Reels, and LinkedIn video. You analyze video transcripts and metrics to provide actionable feedback.
 
@@ -161,8 +161,9 @@ async def analyze_script(script_text: str, platform: str, word_count: int, estim
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
             "temperature": 0.3,
-            "maxOutputTokens": 1024,
+            "maxOutputTokens": 8192,
             "responseMimeType": "application/json",
+            "thinkingConfig": {"thinkingBudget": 1024},
         },
     }
 
@@ -276,8 +277,9 @@ async def analyze_comparison(
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
             "temperature": 0.3,
-            "maxOutputTokens": 2048,
+            "maxOutputTokens": 8192,
             "responseMimeType": "application/json",
+            "thinkingConfig": {"thinkingBudget": 1024},
         },
     }
 
@@ -386,8 +388,9 @@ async def analyze(scorecard: dict, transcript: str) -> dict | None:
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
             "temperature": 0.3,
-            "maxOutputTokens": 1024,
+            "maxOutputTokens": 8192,
             "responseMimeType": "application/json",
+            "thinkingConfig": {"thinkingBudget": 1024},
         },
     }
 
