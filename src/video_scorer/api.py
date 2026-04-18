@@ -207,7 +207,9 @@ async def _analyze_background(req: AnalyzeRequest, analysis_id: str) -> None:
             stored = await store_scorecard(scorecard, analysis_id)
             if not stored:
                 try:
-                    await update_status(analysis_id, "failed", "Failed to store scorecard in database")
+                    marked = await update_status(analysis_id, "failed", "Failed to store scorecard in database")
+                    if not marked:
+                        print(f"  Warning: update_status(failed) returned False for analysis_id={analysis_id} — row may be stuck in processing", file=sys.stderr)
                 except Exception as supabase_err:
                     print(f"  Warning: update_status failed after store failure: {supabase_err}", file=sys.stderr)
 
@@ -215,7 +217,9 @@ async def _analyze_background(req: AnalyzeRequest, analysis_id: str) -> None:
         error_msg = f"Pipeline error: {type(e).__name__}: {str(e)[:200]}"
         print(f"  Background task error for analysis_id={analysis_id}: {error_msg}", file=sys.stderr)
         try:
-            await update_status(analysis_id, "failed", error_msg)
+            marked = await update_status(analysis_id, "failed", error_msg)
+            if not marked:
+                print(f"  Warning: update_status(failed) returned False for analysis_id={analysis_id} — row may be stuck in processing", file=sys.stderr)
         except Exception as supabase_err:
             print(f"  Warning: update_status failed after pipeline error: {supabase_err}", file=sys.stderr)
 

@@ -174,7 +174,8 @@ async def store_scorecard(scorecard: dict, analysis_id: str) -> bool:
         "scored_at": scorecard.get("scored_at"),
     }
 
-    url = f"{settings.supabase_url.rstrip('/')}/rest/v1/video_scorecards?analysis_id=eq.{analysis_id}"
+    # Guard: only write succeeded from processing state — prevents CLI/stale callers overwriting terminal rows
+    url = f"{settings.supabase_url.rstrip('/')}/rest/v1/video_scorecards?analysis_id=eq.{analysis_id}&status=in.(processing)"
     headers["Prefer"] = "return=representation"
 
     try:

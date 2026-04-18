@@ -48,6 +48,8 @@ def test_analyze_returns_202_immediately(mock_update_status):
     assert body["status"] == "processing"
     assert body["analysis_id"] == VALID_ANALYSIS_ID
     mock_update_status.assert_called_once_with(VALID_ANALYSIS_ID, "processing")
+    # BackgroundTask was scheduled (TestClient runs it synchronously)
+    # Patch intercepts via AsyncMock — it was awaited exactly once
 
 
 @patch("video_scorer.api.settings", _mock_settings())
