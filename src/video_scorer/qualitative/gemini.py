@@ -7,7 +7,7 @@ import httpx
 
 from video_scorer.config import settings
 
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro-preview-05-06:generateContent"
 
 SYSTEM_PROMPT = """You are a short-form video content analyst specializing in TikTok, YouTube Shorts, Instagram Reels, and LinkedIn video. You analyze video transcripts and metrics to provide actionable feedback.
 

@@ -2,13 +2,14 @@
 
 import asyncio
 import hmac
+import sys
 import tempfile
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 from uuid import UUID
 
 import httpx
-from fastapi import FastAPI, Request
+from fastapi import BackgroundTasks, FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -177,8 +178,54 @@ async def analyze_script(req: ScriptAnalyzeRequest):
     return result
 
 
+async def _analyze_background(req: AnalyzeRequest, analysis_id: str) -> None:
+    """Run the full video pipeline in the background after /analyze returns 202."""
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            video_path = Path(tmpdir) / _filename_from_url(req.video_url)
+
+            async with httpx.AsyncClient(timeout=300, follow_redirects=False) as client:
+                async with client.stream("GET", req.video_url) as resp:
+                    resp.raise_for_status()
+                    with open(video_path, "wb") as f:
+                        async for chunk in resp.aiter_bytes(1024 * 1024):
+                            f.write(chunk)
+
+            # _run_pipeline is async def but contains blocking FFmpeg subprocess calls.
+            # asyncio.to_thread keeps those blocking calls off the event loop so subsequent
+            # /analyze dispatches are not stalled on this container's single uvicorn worker.
+            scorecard = await asyncio.to_thread(
+                asyncio.run,
+                _run_pipeline(
+                    path=video_path,
+                    platform=req.platform,
+                    qualitative=req.qualitative,
+                    store=False,
+                ),
+            )
+
+            stored = await store_scorecard(scorecard, analysis_id)
+            if not stored:
+                try:
+                    marked = await update_status(analysis_id, "failed", "Failed to store scorecard in database")
+                    if not marked:
+                        print(f"  Warning: update_status(failed) returned False for analysis_id={analysis_id} — row may be stuck in processing", file=sys.stderr)
+                except Exception as supabase_err:
+                    print(f"  Warning: update_status failed after store failure: {supabase_err}", file=sys.stderr)
+
+    except Exception as e:
+        error_msg = f"Pipeline error: {type(e).__name__}: {str(e)[:200]}"
+        print(f"  Background task error for analysis_id={analysis_id}: {error_msg}", file=sys.stderr)
+        try:
+            marked = await update_status(analysis_id, "failed", error_msg)
+            if not marked:
+                print(f"  Warning: update_status(failed) returned False for analysis_id={analysis_id} — row may be stuck in processing", file=sys.stderr)
+        except Exception as supabase_err:
+            print(f"  Warning: update_status failed after pipeline error: {supabase_err}", file=sys.stderr)
+
+
 @app.post("/analyze", status_code=202)
-async def analyze(req: AnalyzeRequest):
+async def analyze(req: AnalyzeRequest, background_tasks: BackgroundTasks):
     # Validate platform
     if req.platform not in VALID_PLATFORMS:
         return JSONResponse(status_code=400, content={"detail": f"Invalid platform: {req.platform}"})
@@ -197,7 +244,7 @@ async def analyze(req: AnalyzeRequest):
 
     analysis_id = str(req.analysis_id)
 
-    # Update status to processing — abort if row doesn't exist or isn't in a valid state
+    # Claim the row — abort if row doesn't exist or isn't in queued state
     status_updated = await update_status(analysis_id, "processing")
     if not status_updated:
         return JSONResponse(
@@ -205,45 +252,8 @@ async def analyze(req: AnalyzeRequest):
             content={"detail": f"Cannot process analysis_id={analysis_id}: row missing or not in queued state"},
         )
 
-    try:
-        # Download video to temp file using streaming (no redirects — SSRF defense)
-        with tempfile.TemporaryDirectory() as tmpdir:
-            video_path = Path(tmpdir) / _filename_from_url(req.video_url)
-
-            async with httpx.AsyncClient(timeout=300, follow_redirects=False) as client:
-                async with client.stream("GET", req.video_url) as resp:
-                    resp.raise_for_status()
-                    with open(video_path, "wb") as f:
-                        async for chunk in resp.aiter_bytes(1024 * 1024):
-                            f.write(chunk)
-
-            # Run pipeline in a thread to avoid blocking the async event loop
-            scorecard = await asyncio.to_thread(
-                asyncio.run,
-                _run_pipeline(
-                    path=video_path,
-                    platform=req.platform,
-                    qualitative=req.qualitative,
-                    store=False,
-                ),
-            )
-
-            # Store result by analysis_id
-            stored = await store_scorecard(scorecard, analysis_id)
-            if not stored:
-                await update_status(analysis_id, "failed", "Failed to store scorecard in database")
-                return JSONResponse(status_code=500, content={"status": "failed"})
-
-    except httpx.HTTPStatusError as e:
-        error_msg = f"Failed to download video: {e.response.status_code}"
-        await update_status(analysis_id, "failed", error_msg)
-        return JSONResponse(status_code=502, content={"status": "failed", "error": error_msg})
-    except Exception as e:
-        error_msg = f"Pipeline error: {type(e).__name__}: {str(e)[:200]}"
-        await update_status(analysis_id, "failed", error_msg)
-        return JSONResponse(status_code=500, content={"status": "failed", "error": error_msg})
-
-    return {"status": "succeeded"}
+    background_tasks.add_task(_analyze_background, req, analysis_id)
+    return {"status": "processing", "analysis_id": analysis_id}
 
 
 def _filename_from_url(url: str) -> str:

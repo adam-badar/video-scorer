@@ -100,8 +100,8 @@ async def update_status(analysis_id: str, status: str, error_message: str | None
     if not headers:
         return False
 
-    # Only transition from non-terminal states to prevent overwriting succeeded/failed
-    allowed_from = "queued,processing" if status == "processing" else "queued,processing"
+    # queued→processing: only allowed from queued. terminal states: only from processing.
+    allowed_from = "queued" if status == "processing" else "processing"
     url = f"{settings.supabase_url.rstrip('/')}/rest/v1/video_scorecards?analysis_id=eq.{analysis_id}&status=in.({allowed_from})"
     headers["Prefer"] = "return=representation"
 
@@ -174,7 +174,8 @@ async def store_scorecard(scorecard: dict, analysis_id: str) -> bool:
         "scored_at": scorecard.get("scored_at"),
     }
 
-    url = f"{settings.supabase_url.rstrip('/')}/rest/v1/video_scorecards?analysis_id=eq.{analysis_id}"
+    # Guard: only write succeeded from processing state — prevents CLI/stale callers overwriting terminal rows
+    url = f"{settings.supabase_url.rstrip('/')}/rest/v1/video_scorecards?analysis_id=eq.{analysis_id}&status=in.(processing)"
     headers["Prefer"] = "return=representation"
 
     try:
