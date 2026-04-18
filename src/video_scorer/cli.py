@@ -190,16 +190,21 @@ async def _run_pipeline(path: Path, platform: str, qualitative: bool, store: boo
 
     if store:
         import uuid
-        from video_scorer.storage.supabase import insert_queued_row
+        from video_scorer.storage.supabase import insert_queued_row, update_status as _update_status
         typer.echo("  [+] Storing scorecard in Supabase...", err=True)
         cli_analysis_id = str(uuid.uuid4())
         inserted = await insert_queued_row(cli_analysis_id, platform)
         if inserted:
-            stored = await store_scorecard(scorecard, cli_analysis_id)
-            if stored:
-                typer.echo("  Stored successfully.", err=True)
+            # Claim the row (queued→processing) before store_scorecard, which guards status=in.(processing)
+            claimed = await _update_status(cli_analysis_id, "processing")
+            if claimed:
+                stored = await store_scorecard(scorecard, cli_analysis_id)
+                if stored:
+                    typer.echo("  Stored successfully.", err=True)
+                else:
+                    typer.echo("  Warning: Failed to store scorecard.", err=True)
             else:
-                typer.echo("  Warning: Failed to store scorecard.", err=True)
+                typer.echo("  Warning: Failed to claim analysis row for storage.", err=True)
         else:
             typer.echo("  Warning: Failed to create analysis row.", err=True)
 
